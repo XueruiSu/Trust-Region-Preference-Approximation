@@ -1,19 +1,8 @@
 
+# TRPA
+Trust Region Preference Approximation: A simple and stable reinforcement learning algorithm for LLM reasoning
 
-## Project Structure
-
-
-#### Environment Setup
-
-
-
-
-## Evaluation
-
-Our evaluation scripts automatically runs vLLM to generate 16 samples for each problem. To run our evaluation scripts, run:
-```bash
-./scripts/eval/eval_with_generation.sh --model [CHECKPOINT_PATH] --datasets [DATASET1] [DATASET2] --output-dir [OUTPUT_DIR]
-```
+Recently, Large Language Models (LLMs) have rapidly evolved, approaching Artificial General Intelligence (AGI) while benefiting from large-scale reinforcement learning to enhance Human Alignment (HA) and Reasoning. Recent reward-based optimization algorithms, such as Proximal Policy Optimization (PPO) and Group Relative Policy Optimization (GRPO) have achieved significant performance on reasoning tasks, whereas preference-based optimization algorithms such as Direct Preference Optimization (DPO) significantly improve the performance of LLMs on human alignment. However, despite the strong performance of reward-based optimization methods in alignment tasks , they remain vulnerable to reward hacking. Furthermore, preference-based algorithms (such as Online DPO) haven't yet matched the performance of reward-based optimization algorithms (like PPO) on reasoning tasks, making their exploration in this specific area still a worthwhile pursuit. Motivated by these challenges, we propose the Trust Region Preference Approximation (TRPA) algorithm, which integrates rule-based optimization with preference-based optimization for reasoning tasks. As a preference-based algorithm, TRPA naturally eliminates the reward hacking issue. TRPA constructs preference levels using predefined rules, forms corresponding preference pairs, and leverages a novel optimization algorithm for RL training with a theoretical monotonic improvement guarantee. Experimental results demonstrate that TRPA not only achieves competitive performance on reasoning tasks but also exhibits robust stability.
 
 ## Benchmark
 
@@ -27,6 +16,47 @@ Our evaluation scripts automatically runs vLLM to generate 16 samples for each p
 | Qwen2.5-7B-Logic-RL         | 0.99 | 0.99 | 0.94 | 0.92 | 0.91 | 0.80 | 0.67 |
 | Qwen2.5-7B-TRPA (ours)      | 0.96 | 0.99 | 0.98 | 0.95 | 0.92 | 0.91 | 0.86 |
 
+
+#### Environment Setup
+```bash
+conda create -n TRPA python=3.9
+pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
+pip3 install vllm==0.6.3 ray
+pip3 install flash-attn --no-build-isolation
+pip install wandb IPython matplotlib codetiming accelerate
+pip install tensordict
+pip install omegaconf hydra-core
+pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
+pip install pylatexenc tabulate
+```
+
+## Data Preparation
+```bash
+python ./scripts/data_preprocess/kk_data_process.py \
+    --template_type=qwen-instruct \ (Optional)
+    --local_dir {processed_data_path} \
+    --data_path {raw_data_path}
+```
+
+## Training
+```bash
+conda activate TRPA
+bash main_TRPA.sh  # 4×A100 80G
+```
+
+
+## Evaluation
+
+Our evaluation scripts automatically runs vLLM to generate 16 samples for each problem. To run our evaluation scripts, run:
+```bash
+./scripts/eval/eval_with_generation.sh --model [CHECKPOINT_PATH] --datasets [DATASET1] [DATASET2] --output-dir [OUTPUT_DIR]
+```
+
+## Acknowledgements
+- [Verl](https://github.com/volcengine/verl) 🔗
+- [Logic RL](https://github.com/Unakar/Logic-RL) 🔗
+- [Knights and Knaves (K&K) puzzles dataset](https://github.com/AlphaPav/mem-kk-logic) 🔗
+- [DeepScaleR](https://github.com/agentica-project/deepscaler) 🔗
 
 
 
