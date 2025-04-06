@@ -13,35 +13,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Pretrain utilities."""
-import os
-from typing import Dict
-
+from typing import Any, Dict
+import time
+from omegaconf import DictConfig
+from verl.utils.torch_dtypes import PrecisionType
+from verl.utils.memory_buffer import build_memory_reference_from_module
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from megatron.core import ModelParallelConfig
+
 from megatron.core import mpu, tensor_parallel
-from megatron.core.distributed import DistributedDataParallel as DDP
-from megatron.core.distributed import DistributedDataParallelConfig
-from megatron.core.enums import ModelType
-from megatron.core.optimizer import OptimizerConfig
+from megatron.core.utils import get_model_config
 from megatron.core.transformer import TransformerConfig
 from megatron.core.transformer.module import Float16Module
-from megatron.core.utils import get_attr_wrapped_model
-from omegaconf import DictConfig
-
-from verl.utils.memory_buffer import build_memory_reference_from_module
-from verl.utils.torch_dtypes import PrecisionType
+# from megatron.core.distributed import DistributedDataParallelConfig
+from megatron.core.distributed import DistributedDataParallel as DDP
+from megatron.core.enums import ModelType
 
 
-def get_model_config(model):
-    return get_attr_wrapped_model(model, 'config', allow_none=False)
-
-
-def get_model(model_provider_func,
-              model_type=ModelType.encoder_or_decoder,
-              wrap_with_ddp=True,
-              use_distributed_optimizer=True):
+def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap_with_ddp=True):
     """Build the model."""
     # Build model.
     if mpu.get_pipeline_model_parallel_world_size() > 1 and \
@@ -105,28 +95,22 @@ def get_model(model_provider_func,
         model_module.cuda(torch.cuda.current_device())
 
     # Fp16 conversion.
-    config: TransformerConfig = get_model_config(model[0])
-    config.fp8 = None
-    tfconfig: TransformerConfig = model[0].config
+    config = get_model_config(model[0])
     if config.fp16 or config.bf16:  # the ModelParallelConfig in GPTModel
         model = [Float16Module(config, model_module) for model_module in model]
 
     if wrap_with_ddp:
-        ddp_models = []
-        for model_chunk_idx, model_chunk in enumerate(model):
-            ddp_model = DDP(
-                config=tfconfig,
+        model = [
+            DDP(config=config,
                 module=model_chunk,
-                disable_bucketing=(model_chunk_idx > 0),
-                ddp_config=DistributedDataParallelConfig(
-                    overlap_grad_reduce=False,
-                    use_distributed_optimizer=use_distributed_optimizer,
-                    grad_reduce_in_fp32=True,  # [old] accumulate_allreduce_grads_in_fp32=True,
-                ))
-            ddp_models.append(ddp_model)
-        model = ddp_models
+                data_parallel_group=mpu.get_data_parallel_group(with_context_parallel=True),
+                accumulate_allreduce_grads_in_fp32=True,
+                overlap_grad_reduce=False,
+                use_distributed_optimizer=True,
+                disable_bucketing=(model_chunk_idx > 0)) for (model_chunk_idx, model_chunk) in enumerate(model)
+        ]
         # # Broadcast params from data parallel src rank to other data parallel ranks.
-        # # if args.data_parallel_random_init:
+        # if args.data_parallel_random_init:
         for model_module in model:
             model_module.broadcast_params()
     return model
@@ -155,11 +139,8 @@ from transformers import PretrainedConfig
 
 def convert_config(hf_config: PretrainedConfig, megatron_config) -> TransformerConfig:
     print(f'megatron config {megatron_config}')
-    dt = PrecisionType.to_dtype(megatron_config.params_dtype)
+    dt = PrecisionType.to_dtype(megatron_config['param_dtype'])
     print(f'pipeline_dtype=megatron_config {dt}')
-    overlap_p2p_comm = mpu.get_virtual_pipeline_model_parallel_world_size(
-    ) is not None and mpu.get_virtual_pipeline_model_parallel_world_size() > 1
-    batch_p2p_comm = False
     transformer_config = TransformerConfig(
         num_layers=hf_config.num_hidden_layers,
         hidden_size=hf_config.hidden_size,
@@ -177,17 +158,28 @@ def convert_config(hf_config: PretrainedConfig, megatron_config) -> TransformerC
         tensor_model_parallel_size=mpu.get_tensor_model_parallel_world_size(),
         pipeline_model_parallel_size=mpu.get_pipeline_model_parallel_world_size(),
         virtual_pipeline_model_parallel_size=mpu.get_virtual_pipeline_model_parallel_world_size(),
-        overlap_p2p_comm=overlap_p2p_comm,
-        batch_p2p_comm=batch_p2p_comm,
-        pipeline_dtype=dt,
-        params_dtype=dt,
-        sequence_parallel=True,
+        pipeline_dtype=PrecisionType.to_dtype(megatron_config['param_dtype']),
+        params_dtype=PrecisionType.to_dtype(megatron_config['param_dtype']),
+        sequence_parallel=megatron_config['sequence_parallel_enabled'],
         variable_seq_lengths=True,
         masked_softmax_fusion=True,
-        moe_token_dispatcher_type="alltoall",
-        bf16=dt is torch.bfloat16)
+        bf16=PrecisionType.to_dtype(megatron_config['param_dtype']) is torch.bfloat16)
+    if torch.distributed.get_rank() == 0:
+        print(f'tensor_parallel_size={transformer_config.tensor_model_parallel_size} \n \
+                pipeline_model_parallel_size={transformer_config.pipeline_model_parallel_size} \n \
+                virtual_pipeline_model_parallel_size={transformer_config.virtual_pipeline_model_parallel_size} \n \
+                pipeline_dtype={transformer_config.pipeline_dtype} \n \
+                params_dtype={transformer_config.params_dtype} \n \
+                sequence_parallel={transformer_config.sequence_parallel} \n \
+                variable_seq_lengths={transformer_config.variable_seq_lengths} \n \
+                masked_softmax_fusion={transformer_config.masked_softmax_fusion} \n ')
 
     return transformer_config
+
+
+# from megatron.core.optimizer import OptimizerConfig
+
+from verl.utils.megatron.optimizer_config import OptimizerConfig
 
 
 def init_megatron_optim_config(optim_config: Dict) -> OptimizerConfig:
@@ -203,9 +195,12 @@ def init_megatron_optim_config(optim_config: Dict) -> OptimizerConfig:
     return config
 
 
+from megatron.core import ModelParallelConfig
+
+
 def init_model_parallel_config(config: DictConfig) -> ModelParallelConfig:
     # TODO(sgm): check how to disable megatron timers
-    timers = None
+    timers = FakeTimers()
     return ModelParallelConfig(tensor_model_parallel_size=config.get('tensor_model_parallel_size'),
                                pipeline_model_parallel_size=config.get('pipeline_model_parallel_size'),
                                virtual_pipeline_model_parallel_size=config.get('virtual_pipeline_model_parallel_size'),
@@ -215,6 +210,17 @@ def init_model_parallel_config(config: DictConfig) -> ModelParallelConfig:
                                bf16=True,
                                fp16=False,
                                timers=timers)
+
+
+class FakeTimers:
+    """Disable All Megatron Timing with FakeTimers"""
+
+    def __init__(self):
+        from megatron.timers import DummyTimer
+        self.dummy_timer = DummyTimer()
+
+    def __call__(self, *args: Any, **kwds: Any) -> Any:
+        return self.dummy_timer
 
 
 def offload_megatron_param_and_grad(module_list: nn.ModuleList, offload_grad=False, hybrid_engine=None):
@@ -245,40 +251,3 @@ def load_megatron_param_and_grad(module_list: nn.ModuleList, device_id, load_gra
                 if load_grad and param.grad is not None:
                     param.grad = param.grad.to(device_id, non_blocking=True)
     torch.cuda.empty_cache()
-
-
-def print_rank_0(message):
-    """If distributed is initialized, print only on rank 0."""
-    if torch.distributed.is_initialized():
-        if torch.distributed.get_rank() == 0:
-            print(message, flush=True)
-    else:
-        print(message, flush=True)
-
-
-def get_model_checkpoint_path(checkpoint_path):
-    os.makedirs(checkpoint_path, exist_ok=True)
-    return os.path.join(checkpoint_path, "model")
-
-
-def get_hf_model_checkpoint_path(checkpoint_path):
-    os.makedirs(checkpoint_path, exist_ok=True)
-    return os.path.join(checkpoint_path, "huggingface")
-
-
-def get_optimizer_checkpoint_path(checkpoint_path, use_distributed_optimizer=True):
-    os.makedirs(os.path.join(checkpoint_path, "optim"), exist_ok=True)
-    if not use_distributed_optimizer:
-        return os.path.join(checkpoint_path, "optim", "optim.pt")
-    pp_rank = mpu.get_pipeline_model_parallel_rank()
-    tp_rank = mpu.get_tensor_model_parallel_rank()
-    #TODO: support ep
-    return os.path.join(checkpoint_path, f"optim", f"distrib_optim_pp{pp_rank}_tp{tp_rank}.pt")
-
-
-def get_rng_states_checkpoint_path(checkpoint_path, data_parallel_random_init=False):
-    os.makedirs(os.path.join(checkpoint_path, "rng_states"), exist_ok=True)
-    if not data_parallel_random_init:
-        return os.path.join(checkpoint_path, f'rng_states', "rng_states.pt")
-    dp_rank = mpu.get_data_parallel_rank()
-    return os.path.join(checkpoint_path, f'rng_states', f"rng_states_{dp_rank}.pt")

@@ -20,11 +20,10 @@ import signal
 import time
 from typing import List, Any, Callable, Dict
 
-from .decorator import MAGIC_ATTR, Dispatch, get_predefined_dispatch_fn, get_predefined_execute_fn
+from verl.single_controller.base.decorator import MAGIC_ATTR, Dispatch, get_predefined_dispatch_fn, get_predefined_execute_fn
 
 
 class ResourcePool:
-    """The resource pool with meta info such as world_size."""
 
     def __init__(self, process_on_nodes=None, max_collocate_count: int = 10, n_gpus_per_node=8) -> None:
         if process_on_nodes is None:
@@ -90,7 +89,6 @@ def check_workers_alive(workers: List, is_alive: Callable, gap_time: float = 1) 
 
 
 class WorkerGroup:
-    """A group of workers"""
 
     def __init__(self, resource_pool: ResourcePool, **kwargs) -> None:
         self._is_init_with_detached_workers = True if resource_pool is None else False

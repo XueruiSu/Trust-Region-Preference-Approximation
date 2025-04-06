@@ -13,6 +13,6 @@
 # limitations under the License.
 
 from . import tokenizer
-from .tokenizer import hf_tokenizer, hf_processor
+from .tokenizer import *
 
 __all__ = tokenizer.__all__

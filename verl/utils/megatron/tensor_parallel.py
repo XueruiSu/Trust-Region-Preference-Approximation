@@ -108,12 +108,7 @@ class _VocabParallelEntropy(torch.autograd.Function):
         normalized_sum_exp_logits = normalized_exp_logits.sum(dim=-1, keepdim=True)
         dist.all_reduce(normalized_sum_exp_logits, group=mpu.get_tensor_model_parallel_group())
         softmax_logits = normalized_exp_logits / normalized_sum_exp_logits
-        # This consume too much VRAM, causing OOM, try optimize
-        # sum_softmax_times_logits = (softmax_logits * vocab_parallel_logits).sum(dim=-1, keepdim=True)
-        original_shape = softmax_logits.shape
-        sum_softmax_times_logits = torch.bmm(softmax_logits.view(-1, 1, original_shape[-1]),
-                                             vocab_parallel_logits.view(-1, original_shape[-1],
-                                                                        1)).view(original_shape[:-1] + (1,))
+        sum_softmax_times_logits = (softmax_logits * vocab_parallel_logits).sum(dim=-1, keepdim=True)
         dist.all_reduce(sum_softmax_times_logits, group=mpu.get_tensor_model_parallel_group())
         entropy = logits_max + normalized_sum_exp_logits.log() - sum_softmax_times_logits
         ctx.save_for_backward(vocab_parallel_logits, softmax_logits, sum_softmax_times_logits)
@@ -170,13 +165,13 @@ def vocab_parallel_log_probs_from_logits_response_rmpad(input_ids, attention_mas
     return output
 
 
-def vocab_parallel_compute_entropy_loss(logits, response_mask):
+def vocab_parallel_compute_entropy_loss(logits, eos_mask):
     """Compute Categorical entropy loss
 
     Args:
         logits: `(torch.Tensor)`
             shape: (bs, response_length, vocab_size)
-        response_mask: `(torch.Tensor)`
+        eos_mask: `(torch.Tensor)`
             shape: (bs, response_length)
 
     Returns:
@@ -185,5 +180,5 @@ def vocab_parallel_compute_entropy_loss(logits, response_mask):
     """
     # compute entropy
     entropy = vocab_parallel_entropy(logits)
-    entropy_loss = verl_F.masked_mean(entropy, mask=response_mask)
+    entropy_loss = verl_F.masked_mean(entropy, mask=eos_mask)
     return entropy_loss

@@ -19,10 +19,7 @@ import math
 import itertools
 import os
 from contextlib import contextmanager
-from torch.distributed import DeviceMesh
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy, transformer_auto_wrap_policy
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._runtime_utils import _lazy_init
 from transformers.trainer_pt_utils import get_module_class_from_name
 import torch
 import torch.nn as nn
@@ -36,14 +33,11 @@ def init_fn(x: torch.nn.Module):
     return x
 
 
-def get_init_weight_context_manager(use_meta_tensor=True, mesh: DeviceMesh = None):
+def get_init_weight_context_manager(use_meta_tensor=True):
     from accelerate import init_empty_weights
     cpu_init_weights = lambda: torch.device('cpu')
     if use_meta_tensor:
-        if mesh is None:
-            init_context = init_empty_weights if torch.distributed.get_rank() != 0 else cpu_init_weights
-        else:
-            init_context = init_empty_weights if mesh.get_coordinate()[-1] != 0 else cpu_init_weights
+        init_context = init_empty_weights if torch.distributed.get_rank() != 0 else cpu_init_weights
     else:
         init_context = cpu_init_weights
     return init_context
@@ -51,14 +45,7 @@ def get_init_weight_context_manager(use_meta_tensor=True, mesh: DeviceMesh = Non
 
 # Copyright 2020-present the HuggingFace Inc. team.
 # Adapted from https://github.com/huggingface/transformers/src/transformers/trainer.py
-def get_fsdp_wrap_policy(module, config=None, is_lora=False):
-    """Get FSDP wrap policy for the module.
-    
-    Args:
-        module: The module to get wrap policy for
-        config: Configuration for wrap policy
-        is_lora: Whether to enable lambda policy for LoRA modules
-    """
+def get_fsdp_wrap_policy(module, config=None):
     if config is None:
         config = {}
 
@@ -70,26 +57,8 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False):
                                                     default_transformer_cls_names_to_wrap)
     min_num_params = config.get('min_num_params', 0)
     auto_wrap_policy = None
-
-    policies = []
-
-    from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
-
-    # Add lambda policy for LoRA modules if is_lora is True
-    if is_lora:
-
-        def lambda_policy_fn(module):
-            if (len(list(module.named_children())) == 0 and getattr(module, "weight", None) is not None and
-                    module.weight.requires_grad):
-                return True
-            return False
-
-        lambda_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=lambda_policy_fn)
-        policies.append(lambda_policy)
-
     if min_num_params > 0:
-        size_policy = functools.partial(size_based_auto_wrap_policy, min_num_params=min_num_params)
-        policies.append(size_policy)
+        auto_wrap_policy = functools.partial(size_based_auto_wrap_policy, min_num_params=min_num_params)
     elif fsdp_transformer_layer_cls_to_wrap is not None:
         transformer_cls_to_wrap = set()
         for layer_class in fsdp_transformer_layer_cls_to_wrap:
@@ -99,77 +68,66 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False):
             else:
                 transformer_cls_to_wrap.add(transformer_cls)
 
-        transformer_policy = functools.partial(
+        auto_wrap_policy = functools.partial(
             transformer_auto_wrap_policy,
+            # Transformer layer class to wrap
             transformer_layer_cls=transformer_cls_to_wrap,
         )
-        policies.append(transformer_policy)
-
-    if len(policies) > 0:
-        auto_wrap_policy = functools.partial(_or_policy, policies=policies)
-
     return auto_wrap_policy
 
 
-@torch.no_grad()
-def offload_fsdp_model_to_cpu(model: FSDP, empty_cache: bool = True):
-    assert isinstance(model, FSDP)
-    # lazy init FSDP model
-    _lazy_init(model, model)
-    assert model._is_root, f"Only support root model offloading to CPU"
-    for handle in model._all_handles:
-        if handle._offload_params:
-            continue
-        flat_param = handle.flat_param
-        assert flat_param.data.data_ptr() == flat_param._local_shard.data_ptr() and \
-            id(flat_param.data) != id(flat_param._local_shard) and \
-            flat_param.data.size() == flat_param._local_shard.size()
-        handle.flat_param_to(torch.device("cpu"), non_blocking=True)
-        # the following still keeps id(._local_shard) != id(.data)
-        flat_param._local_shard = flat_param.data
-        assert id(flat_param._local_shard) != id(flat_param.data)
-    if empty_cache:
-        torch.cuda.empty_cache()
+def offload_fsdp_grad(module):
+    for _, param in module.named_parameters():
+        if param.grad is not None:
+            param.grad = param.grad.to("cpu", non_blocking=True)
+    torch.cuda.empty_cache()
 
 
-@torch.no_grad()
-def load_fsdp_model_to_gpu(model: FSDP):
-    assert isinstance(model, FSDP)
-    # lazy init FSDP model
-    _lazy_init(model, model)
-    assert model._is_root, f"Only support root model loading to GPU"
-    device_id = torch.cuda.current_device()
-    for handle in model._all_handles:
-        if handle._offload_params:
-            continue
-        flat_param = handle.flat_param
-        handle.flat_param_to(torch.device(f"cuda:{device_id}"), non_blocking=True)
-        # the following still keeps id(._local_shard) != id(.data)
-        flat_param._local_shard = flat_param.data
+def load_fsdp_grad(module, device_id):
+    for _, param in module.named_parameters():
+        if param.grad is not None:
+            param.grad = param.grad.to(device_id, non_blocking=True)
+    torch.cuda.empty_cache()
 
 
-@torch.no_grad()
+def offload_fsdp_param_and_grad(module, offload_grad=False):
+    for _, param in module.named_parameters():
+        if hasattr(param, "_local_shard"):
+            param._local_shard = param._local_shard.to("cpu", non_blocking=True)
+        param.data = param.data.to('cpu', non_blocking=True)
+        if offload_grad and param.grad is not None:
+            param.grad = param.grad.to("cpu", non_blocking=True)
+    torch.cuda.empty_cache()
+
+
+def load_fsdp_param_and_grad(module, device_id, load_grad=False):
+    for _, param in module.named_parameters():
+        if hasattr(param, "_local_shard"):
+            param._local_shard = param._local_shard.to(device_id, non_blocking=True)
+        param.data = param.data.to(device_id, non_blocking=True)
+        if load_grad and param.grad is not None:
+            param.grad = param.grad.to(device_id, non_blocking=True)
+    torch.cuda.empty_cache()
+
+
 def offload_fsdp_optimizer(optimizer):
-    if not optimizer.state:
-        return
     for param_group in optimizer.param_groups:
         for param in param_group['params']:
             state = optimizer.state[param]
             for key, value in state.items():
                 if isinstance(value, torch.Tensor):
                     state[key] = value.to("cpu", non_blocking=True)
+    torch.cuda.empty_cache()
 
 
-@torch.no_grad()
 def load_fsdp_optimizer(optimizer, device_id):
-    if not optimizer.state:
-        return
     for param_group in optimizer.param_groups:
         for param in param_group['params']:
             state = optimizer.state[param]
             for key, value in state.items():
                 if isinstance(value, torch.Tensor):
                     state[key] = value.to(device_id, non_blocking=True)
+    torch.cuda.empty_cache()
 
 
 @contextmanager

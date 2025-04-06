@@ -17,6 +17,7 @@ Contain small torch utilities
 
 from typing import Dict, Union, List, Optional
 
+import os
 import torch
 import torch.distributed
 import torch.nn.functional as F
@@ -57,15 +58,13 @@ def logprobs_from_logits(logits, labels):
         output = logprobs_from_logits_flash_attn(logits, labels)
         output = output.view(*batch_dim)
     else:
-        output = logprobs_from_logits_v2(logits, labels)
+        output = logprobs_from_logits_naive(logits, labels)
     return output
 
 
 def logprobs_from_logits_flash_attn(logits, labels):
-    output = cross_entropy_loss(logits, labels)
-    assert isinstance(
-        output, tuple), "please make sure flash-attn>=2.4.3 where cross_entropy_loss returns Tuple[losses, z_losses]."
-    return -output[0]
+    output = -cross_entropy_loss(logits, labels)[0]
+    return output
 
 
 def logprobs_from_logits_naive(logits, labels):
@@ -74,24 +73,14 @@ def logprobs_from_logits_naive(logits, labels):
     return logpy
 
 
-def logprobs_from_logits_v2(logits: torch.FloatTensor, labels):
+def logprobs_of_labels_v2(logits: torch.FloatTensor, labels):
     """
     A memory efficient implementation of logprobs_from_logits
     """
-    if logits.dtype in [torch.float32, torch.float64]:
-        logits_labels = torch.gather(logits, dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
-        # loop to reduce peak mem consumption
-        logsumexp_values = torch.stack([torch.logsumexp(l, dim=-1) for l in logits])
-        logprobs_labels = logits_labels - logsumexp_values  # log_softmax(x_i) = x_i - logsumexp(x)
-    else:
-        # logsumexp approach is unstable with bfloat16, fall back to slightly less efficent approach
-        logprobs_labels = []
-        for row_logits, row_labels in zip(logits, labels):  # loop to reduce peak mem consumption
-            row_logprobs = F.log_softmax(row_logits, dim=-1)
-            row_logprobs_labels = row_logprobs.gather(dim=-1, index=row_labels.unsqueeze(-1)).squeeze(-1)
-            logprobs_labels.append(row_logprobs_labels)
-        logprobs_labels = torch.stack(logprobs_labels)
-    return logprobs_labels
+    assert logits.dtype == torch.float32, 'Using bf16 logits with logprobs_of_labels_v2 may lead to divergence'
+    logprobs_labels = torch.gather(logits, dim=-1, index=labels.unsqueeze(-1))
+    logprobs_labels = logprobs_labels - torch.logsumexp(logits, dim=-1, keepdim=True)
+    return logprobs_labels.squeeze(-1)
 
 
 def clip_by_value(x, tensor_min, tensor_max):
@@ -117,7 +106,7 @@ def masked_sum(values, mask, axis=None):
 
 def masked_mean(values, mask, axis=None):
     """Compute mean of tensor with a masked values."""
-    return (values * mask).sum(axis=axis) / (mask.sum(axis=axis) + 1e-8)
+    return (values * mask).sum(axis=axis) / mask.sum(axis=axis)
 
 
 def masked_var(values, mask, unbiased=True):
@@ -147,27 +136,16 @@ def masked_whiten(values, mask, shift_mean=True):
     return whitened
 
 
-def get_response_mask(response_id: torch.Tensor, eos_token: Union[int, List[int]] = 2, dtype=torch.int64):
+def get_eos_mask(response_id: torch.Tensor, eos_token: int = 2, dtype=torch.int64):
     '''
-    end of sentence token can be int or list: 1 or [1, 2]
-    e.g. 
-    response_id = torch.tensor([[20, 10, 34, 1, 0, 0, 0],
-                                [78, 0, 76, 2, 1, 0, 0],
-                                [23, 98, 1, 0, 0, 0, 0],
-                                [33, 3, 98, 45, 1, 0, 0]])
-    #eos_token=1
-    response_mask:  tensor([[1, 1, 1, 1, 0, 0, 0],
-                            [1, 1, 1, 1, 1, 0, 0],
-                            [1, 1, 1, 0, 0, 0, 0],
-                            [1, 1, 1, 1, 1, 0, 0]])
-    #eos_token=[1,2]
-    response_mask:  tensor([[1, 1, 1, 1, 0, 0, 0],
-                            [1, 1, 1, 1, 0, 0, 0],
-                            [1, 1, 1, 0, 0, 0, 0],
-                            [1, 1, 1, 1, 1, 0, 0]])
+    e.g. end of sentence token=1
+    response_id: [0, 0, 2, 42, 3, 5, 1, 0, 0]
+    eos_mask:     [1, 1, 1, 1,  1, 1, 1, 0, 0]
     '''
-    eos_mask = torch.isin(response_id, torch.tensor(eos_token, device=response_id.device)).int()
-    return (eos_mask.cumsum(dim=1) - eos_mask).eq(0).to(dtype)
+    eos_mask = response_id.eq(eos_token).long()
+    eos_mask = (torch.cumsum(eos_mask, dim=1) - eos_mask).bool()
+    eos_mask = torch.logical_not(eos_mask).to(dtype)
+    return eos_mask
 
 
 def compute_grad_norm(model: nn.Module):
@@ -228,20 +206,6 @@ def split_dict_tensor_into_batches(tensors: TensorDict, batch_size) -> List[Tens
     return tensors.split(batch_size)
 
 
-def pad_2d_list_to_length(response, pad_token_id, max_length=None):
-    """
-    pad a 2D list (e.g. responses, logprobs) to a 2D tensor.
-    """
-    response_length = max(len(sub_list) for sub_list in response)
-    if max_length is not None and max_length > response_length:
-        target_length = max_length
-    else:
-        target_length = response_length
-    padded_response = [tuple(sub_list) + (pad_token_id,) * (target_length - len(sub_list)) for sub_list in response]
-    tensor = torch.tensor(padded_response)
-    return tensor
-
-
 def pad_sequence_to_length(tensors, max_seq_len, pad_token_id, left_pad=False):
     """
     pad a 2D tensors (e.g. responses, logprobs) in the last dim to max_seq_length.
@@ -263,11 +227,12 @@ def tokenize_and_postprocess_data(prompt: str,
                                   max_length: int,
                                   pad_token_id: int,
                                   left_pad=True,
-                                  truncation='error'):
+                                  truncation='right'):
     """
     input_data is the output from tokenizer.
     """
     assert truncation in ['left', 'right', 'error']
+    truncation = 'right'
 
     input_data = tokenizer(prompt, return_tensors='pt', add_special_tokens=False)
 
@@ -303,7 +268,7 @@ def tokenize_and_postprocess_data(prompt: str,
 
 
 def remove_pad_token(input_ids: torch.Tensor, attention_mask: torch.Tensor):
-    """ Remove the pad token.
+    """ Remove the pad token. 
 
     Args:
         input_ids shape: [bs, seq_length]
@@ -319,13 +284,13 @@ def remove_pad_token(input_ids: torch.Tensor, attention_mask: torch.Tensor):
 
 def log_probs_from_logits_response(input_ids, logits, response_length):
     """Compute the response log_probs from full logits. Note that logits = model(input_ids)
-
+    
     Args:
         input_ids: [batch_size, seqlen]
         logits: [batch_size, seqlen, vocab_size]
-
+    
     Returns:
-        response_log_prob:
+        response_log_prob: 
     """
     response_logits = logits[:, -response_length - 1:-1]
     response = input_ids[:, -response_length:]
@@ -339,7 +304,7 @@ def log_probs_from_logits_response_rmpad(input_ids, attention_mask, logits_rmpad
     logits and input_ids.
     The reason for this function to is to compute logprobs_from_logits in rmpad mode because it is memory-intensive
     for large vocab_size
-
+    
     Args:
         input_ids: [batch_size, seqlen]
         attention_mask: [batch_size, seqlen]
@@ -367,7 +332,7 @@ def log_probs_from_logits_all_rmpad(input_ids_rmpad, logits_rmpad, indices, batc
     logits and input_ids.
     The reason for this function to is to compute logprobs_from_logits in rmpad mode because it is memory-intensive
     for large vocab_size
-
+    
     Args:
         input_ids_rmpad: [1, total_nnz]
         logits_rmpad: [total_nnz, vocab_size]

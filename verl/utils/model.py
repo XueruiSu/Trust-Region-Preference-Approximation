@@ -16,12 +16,12 @@ Utilities to create common models from huggingface
 """
 import os
 import warnings
-from typing import Dict, Type, Optional
+from typing import Dict, Type
 
 import numpy as np
 import torch
 from torch import nn
-from transformers import AutoConfig, AutoModelForCausalLM, PretrainedConfig, MistralForSequenceClassification, GenerationConfig
+from transformers import AutoConfig, AutoModelForCausalLM, PretrainedConfig, MistralForSequenceClassification
 from verl.models.registry import ModelRegistry
 
 
@@ -55,29 +55,12 @@ def get_huggingface_actor_config(model_name: str, override_config_kwargs=None, t
     return module_config
 
 
-def get_generation_config(
-    model: str,
-    trust_remote_code: bool = False,
-) -> Optional[GenerationConfig]:
-    try:
-        return GenerationConfig.from_pretrained(model)
-    except OSError:  # Not found
-        try:
-            config = get_huggingface_actor_config(
-                model,
-                trust_remote_code=trust_remote_code,
-            )
-            return GenerationConfig.from_model_config(config)
-        except OSError:  # Not found
-            return None
-
-
 def create_huggingface_actor(model_name: str, override_config_kwargs=None, automodel_kwargs=None) -> nn.Module:
     """
 
     Args:
         model_name:
-        override_config_kwargs:
+        actor_override_config_kwargs:
 
     Returns:
 
@@ -197,7 +180,7 @@ def compute_position_id_with_mask(mask):
 
 def normalize_pp_vpp_params(params, num_hidden_layers, layer_name='layers'):
     """
-    Normalize the pp vpp params into a complete named parameters.
+    Normalize the pp vpp params into a complete named parameters. 
     This is useful when gather parameters from pp ranks and passed to a model without pp
 
     params: List[List[Dict[str, param]]]
@@ -248,21 +231,12 @@ def normalize_pp_vpp_params(params, num_hidden_layers, layer_name='layers'):
     return normalized_name_to_param
 
 
-def get_parallel_model_from_config(config,
-                                   megatron_config,
-                                   pre_process=None,
-                                   post_process=None,
-                                   share_embeddings_and_output_weights=False,
-                                   value=False):
+def get_parallel_model_from_config(config, megatron_config, pre_process=None, post_process=None, value=False):
     from megatron.core import ModelParallelConfig
     assert isinstance(megatron_config, ModelParallelConfig)
     model_class = _get_parallel_model_architecture_from_config(config, value)
 
-    model = model_class(config,
-                        megatron_config,
-                        pre_process=pre_process,
-                        post_process=post_process,
-                        share_embeddings_and_output_weights=share_embeddings_and_output_weights)
+    model = model_class(config, megatron_config, pre_process=pre_process, post_process=post_process)
     return model
 
 
@@ -270,7 +244,6 @@ def _get_parallel_model_architecture_from_config(config: PretrainedConfig, value
     architectures = getattr(config, "architectures", [])
     for arch in architectures:
         model_cls = ModelRegistry.load_model_cls(arch, value)
-        print(f'after load model cls')
         if model_cls is not None:
             return model_cls
     raise ValueError(f"Model architectures {architectures} are not supported for now. "
@@ -288,33 +261,27 @@ def load_megatron_model_weights(config,
     local_cache_path = os.path.expanduser(local_cache_path)
 
     if config.model.path.startswith("hdfs:"):
-        from verl.utils.fs import copy_to_local
+        from verl.utils.fs import copy_local_path_from_hdfs
         print(f'start download from {config.model.path}')
-        local_model_path = copy_to_local(src=config.model.path, cache_dir=local_cache_path)
+        local_model_path = copy_local_path_from_hdfs(src=config.model.path, cache_dir=local_cache_path)
         print('finish download')
     else:
+        print(f"load from local dir {config.model.path}")
         local_model_path = config.model.path
-        print(f"load from local dir {local_model_path}")
 
     # TODO: to find a better way to load mistral7b-rm lm_head
-    from verl.utils.fsdp_utils import get_init_weight_context_manager
-    init_context = get_init_weight_context_manager(use_meta_tensor=not model_config.tie_word_embeddings)
-    with init_context(), warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        if 'mistral7b-rm' in config.model.path:
-            model = MistralForSequenceClassification.from_pretrained(
-                local_model_path, device_map="auto", low_cpu_mem_usage=True)  # use score head instead of lm_head
-            state_dict = model.state_dict()
-            state_dict['lm_head.weight'] = state_dict['score.weight']
-            state_dict['model.embed_tokens.weight'] = state_dict[
-                'model.embed_tokens.weight'][:32000]  # workaround, 32001 -> 32000
-            is_value_model = True
-        else:
-            model = AutoModelForCausalLM.from_pretrained(local_model_path,
-                                                         torch_dtype="auto",
-                                                         device_map="auto",
-                                                         low_cpu_mem_usage=True)
-            state_dict = model.state_dict()
+    if 'mistral7b-rm' in config.model.path:
+        model = MistralForSequenceClassification.from_pretrained(local_model_path)  # use score head instead of lm_head
+        state_dict = model.state_dict()
+        state_dict['lm_head.weight'] = state_dict['score.weight']
+        state_dict['model.embed_tokens.weight'] = state_dict[
+            'model.embed_tokens.weight'][:32000]  # workaround, 32001 -> 32000
+        is_value_model = True
+    else:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+        model = AutoModelForCausalLM.from_pretrained(local_model_path)
+        state_dict = model.state_dict()
 
     from verl.models.weight_loader_registry import get_weight_loader
     print(f'before weight loader: architectures = {architectures}...')
@@ -325,9 +292,7 @@ def load_megatron_model_weights(config,
                       wrapped_models=parallel_model,
                       config=model.config,
                       params_dtype=params_dtype,
-                      is_value_model=is_value_model,
-                      tie_word_embeddings=model_config.tie_word_embeddings)
-    return model.config
+                      is_value_model=is_value_model)
 
 
 # pad input_ids_rmpad, cu_seqlens and max_seqlen_in_batch to be divisible by tp

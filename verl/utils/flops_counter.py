@@ -13,9 +13,9 @@
 # limitations under the License.
 
 import torch
-from transformers import PretrainedConfig
+from transformers import PretrainedConfig, Qwen2Config, LlamaConfig
 
-VALID_CONFIG_TYPE = {"llama", "qwen2", "qwen2_vl", "qwen2_5_vl", "deepseek_v3"}
+VALID_CONFIG_TYPE = (Qwen2Config, LlamaConfig)
 
 
 def get_device_flops(unit="T"):
@@ -32,10 +32,7 @@ def get_device_flops(unit="T"):
 
     device_name = torch.cuda.get_device_name()
     flops = float("inf")  # INF flops for unkown gpu type
-
-    if "MI300X" in device_name:
-        flops = 1336e12
-    elif "H100" in device_name or "H800" in device_name:
+    if "H100" in device_name or "H800" in device_name:
         flops = 989e12
     elif "A100" in device_name or "A800" in device_name:
         flops = 312e12
@@ -62,23 +59,18 @@ class FlopsCounter:
     """
 
     def __init__(self, config: PretrainedConfig):
-        if not config.model_type in VALID_CONFIG_TYPE:
-            print(f"Only support config type of {VALID_CONFIG_TYPE}, but got {config.model_type}. "
+        if not isinstance(config, VALID_CONFIG_TYPE):
+            print(f"Only support config type of {VALID_CONFIG_TYPE}, but got {type(config)}. "
                   f"MFU will always be zero.")
 
-        self.estimate_func = {
-            'qwen2': self._estimate_qwen2_flops,
-            'llama': self._estimate_qwen2_flops,
-            'qwen2_vl': self._estimate_qwen2_flops,
-            'qwen2_5_vl': self._estimate_qwen2_flops,
-            'deepseek_v3': self._estimate_deepseek_v3_flops,
-        }
+        self.estimate_func = {"qwen2": self._estimate_qwen2_flops, 'llama': self._estimate_qwen2_flops}
         self.config = config
 
     def _estimate_unknown_flops(self, tokens_sum, batch_seqlens, delta_time):
         return 0
 
     def _estimate_qwen2_flops(self, tokens_sum, batch_seqlens, delta_time):
+        assert isinstance(self.config, (Qwen2Config, LlamaConfig))
         hidden_size = self.config.hidden_size
         vocab_size = self.config.vocab_size
         num_hidden_layers = self.config.num_hidden_layers
@@ -110,55 +102,6 @@ class FlopsCounter:
         # all_layer & all_token fwd & bwd flops
         flops_all_token = dense_N_flops + attn_qkv_flops
         flops_achieved = flops_all_token * (1.0 / delta_time) / 1e12
-        return flops_achieved
-
-    def _estimate_deepseek_v3_flops(self, tokens_sum, batch_seqlens, delta_time):
-        hidden_size = self.config.hidden_size
-        vocab_size = self.config.vocab_size
-        moe_intermediate_size = self.config.moe_intermediate_size
-        num_hidden_layers = self.config.num_hidden_layers
-        first_k_dense_replace = self.config.first_k_dense_replace
-        num_query_heads = self.config.num_attention_heads
-        moe_num_expert = self.config.n_routed_experts
-
-        moe_topk = self.config.num_experts_per_tok
-        share_expert_num = self.config.n_shared_experts
-
-        # non-attn per layer parm
-        moe_gata_N = hidden_size * moe_num_expert
-        # moe has fc1_1, fc1_2 and fc2 using SwiGLU in ExpertMlp layer & shared experts
-        moe_expertmlp_N = hidden_size * moe_intermediate_size * (moe_topk + share_expert_num) * 3
-        # MLA attn
-        attn_linear_N = 0
-        q_head_dim = self.config.qk_nope_head_dim + self.config.qk_rope_head_dim
-        if self.config.q_lora_rank is None:
-            attn_linear_N += hidden_size * num_query_heads * q_head_dim
-        else:
-            attn_linear_N += hidden_size * self.config.q_lora_rank
-            attn_linear_N += num_query_heads * q_head_dim * self.config.q_lora_rank
-
-        attn_linear_N += hidden_size * (self.config.kv_lora_rank + self.config.qk_rope_head_dim)
-        attn_linear_N += (num_query_heads * (q_head_dim - self.config.qk_rope_head_dim + self.config.v_head_dim) *
-                          self.config.kv_lora_rank)
-        attn_linear_N += num_query_heads * self.config.v_head_dim * hidden_size
-        emd_and_lm_head_N = vocab_size * hidden_size * 2
-        # non-attn all_layer parm
-        moe_N = ((moe_gata_N + moe_expertmlp_N + attn_linear_N) * (num_hidden_layers - first_k_dense_replace) +
-                 (hidden_size * self.config.intermediate_size * 3 + attn_linear_N) * first_k_dense_replace +
-                 emd_and_lm_head_N)
-        # non-attn all_layer & all_token fwd & bwd flops
-        dense_N_flops = 6 * moe_N * tokens_sum
-
-        # attn all_layer & all_token fwd & bwd flops
-        seqlen_square_sum = 0
-        for seqlen in batch_seqlens:
-            seqlen_square_sum += seqlen * seqlen * num_hidden_layers
-
-        attn_qkv_flops = 12 * seqlen_square_sum * q_head_dim * num_query_heads
-        # all_layer & all_token fwd & bwk flops
-        flops_all_token = dense_N_flops + attn_qkv_flops
-        flops_achieved = flops_all_token * (1.0 / delta_time) / 1e12
-
         return flops_achieved
 
     def estimate_flops(self, batch_seqlens, delta_time):
