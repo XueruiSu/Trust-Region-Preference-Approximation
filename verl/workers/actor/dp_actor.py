@@ -303,7 +303,7 @@ class DataParallelPPOActor(BasePPOActor):
                         tr_kl_loss = masked_mean(tr_kld, response_mask)
 
                         if self.config.use_sqrt_trkl:
-                            policy_loss = policy_loss + torch.sqrt(tr_kl_loss + 0.25) * self.config.tr_kl_loss_coef # 开根号会炸梯度
+                            policy_loss = policy_loss + torch.sqrt(tr_kl_loss + 0.25) * self.config.tr_kl_loss_coef
                         else:
                             policy_loss = policy_loss + (tr_kl_loss) * self.config.tr_kl_loss_coef
                         metrics['actor/tr_kl_loss'] = tr_kl_loss.detach().item()
