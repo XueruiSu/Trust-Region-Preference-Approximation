@@ -25,7 +25,7 @@ We propose the Trust Region Preference Approximation (TRPA) algorithm, which int
 | Qwen2.5-7B-TRPA (ours)      | 0.96 | 0.99 | 0.98 | 0.95 | 0.92 | 0.91 | 0.86 |
 
 
-#### Environment Setup
+## Environment Setup
 ```bash
 conda create -n TRPA python=3.9
 pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
@@ -51,19 +51,12 @@ conda activate TRPA
 bash main_TRPA.sh  # 4×A100 80G
 ```
 
-
 ## Evaluation
 
 Our evaluation scripts automatically runs vLLM to generate 16 samples for each problem. To run our evaluation scripts, run:
 ```bash
 ./scripts/eval/eval_with_generation.sh --model [CHECKPOINT_PATH] --datasets [DATASET1] [DATASET2] --output-dir [OUTPUT_DIR]
 ```
-
-## Acknowledgements
-- [Verl](https://arxiv.org/abs/2409.19256) 🔗
-- [Logic RL](https://arxiv.org/abs/2502.14768) 🔗
-- [Knights and Knaves (K&K) puzzles dataset](https://arxiv.org/abs/2410.23123) 🔗
-- [DeepScaleR](https://github.com/agentica-project/deepscaler) 🔗
 
 ## Citation
 ```bibtex
@@ -74,6 +67,13 @@ Our evaluation scripts automatically runs vLLM to generate 16 samples for each p
   year={2025},
 }
 ```
+
+## Acknowledgements
+- [Verl](https://arxiv.org/abs/2409.19256) 🔗
+- [Logic RL](https://arxiv.org/abs/2502.14768) 🔗
+- [Knights and Knaves (K&K) puzzles dataset](https://arxiv.org/abs/2410.23123) 🔗
+- [DeepScaleR](https://github.com/agentica-project/deepscaler) 🔗
+
 
 
 
