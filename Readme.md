@@ -7,12 +7,12 @@
 </div>
 
 
-We propose the Trust Region Preference Approximation (TRPA) algorithm, which integrates rule-based optimization with preference-based optimization for reasoning tasks. As a preference-based algorithm, TRPA naturally eliminates the reward hacking issue. TRPA constructs preference levels using predefined rules, forms corresponding preference pairs, and leverages a novel optimization algorithm for RL training with a theoretical monotonic improvement guarantee. Experimental results demonstrate that TRPA not only achieves competitive performance on reasoning tasks but also exhibits robust stability.
+We propose the Trust Region Preference Approximation (TRPA) algorithm ⚙️, which integrates rule-based optimization with preference-based optimization for LLM reasoning tasks 🤖🧠. As a preference-based algorithm, TRPA naturally eliminates the reward hacking issue. TRPA constructs preference levels using predefined rules, forms corresponding preference pairs, and leverages a novel optimization algorithm for RL training with a theoretical monotonic improvement guarantee. Experimental results demonstrate that TRPA not only achieves competitive performance on reasoning tasks but also exhibits robust stability.
 
 ![TRPA](https://github.com/user-attachments/assets/7c975200-e618-4b1a-9e5e-e50ed1b9de7a)
 
 
-## Benchmark
+## 🏆 Benchmark
 
 | Model                                                             | 2ppl | 3ppl | 4ppl | 5ppl | 6ppl | 7ppl | 8ppl |
 |------------------------------------------------------------------------|------|------|------|------|------|------|------|
@@ -25,7 +25,7 @@ We propose the Trust Region Preference Approximation (TRPA) algorithm, which int
 | Qwen2.5-7B-TRPA (ours)      | 0.96 | 0.99 | 0.98 | 0.95 | 0.92 | 0.91 | 0.86 |
 
 
-## Environment Setup
+## 🛠️ Installation
 ```bash
 conda create -n TRPA python=3.9
 pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
@@ -37,7 +37,7 @@ pip install omegaconf hydra-core pylatexenc tabulate
 pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
 ```
 
-## Data Preparation
+## 📝 Data Preparation
 ```bash
 python ./scripts/data_preprocess/kk_data_process.py \
     --template_type=qwen-instruct \ (Optional)
@@ -45,20 +45,20 @@ python ./scripts/data_preprocess/kk_data_process.py \
     --data_path {raw_data_path}
 ```
 
-## Training
+## 🦾 Training
 ```bash
 conda activate TRPA
 bash main_TRPA.sh  # 4×A100 80G
 ```
 
-## Evaluation
+## 🤖 Evaluation
 
 Our evaluation scripts automatically runs vLLM to generate 16 samples for each problem. To run our evaluation scripts, run:
 ```bash
 ./scripts/eval/eval_with_generation.sh --model [CHECKPOINT_PATH] --datasets [DATASET1] [DATASET2] --output-dir [OUTPUT_DIR]
 ```
 
-## Citation
+## 📚 Citation
 ```bibtex
 @article{su2025trustregionpreferenceapproximation,
   title={Trust Region Preference Approximation: A simple and stable reinforcement learning algorithm for LLM reasoning}, 
@@ -68,7 +68,7 @@ Our evaluation scripts automatically runs vLLM to generate 16 samples for each p
 }
 ```
 
-## Acknowledgements
+## 📖 Acknowledgements
 - [Verl](https://arxiv.org/abs/2409.19256) 🔗
 - [Logic RL](https://arxiv.org/abs/2502.14768) 🔗
 - [Knights and Knaves (K&K) puzzles dataset](https://arxiv.org/abs/2410.23123) 🔗
