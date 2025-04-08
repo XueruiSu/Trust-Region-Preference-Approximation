@@ -1,5 +1,12 @@
+<div align="center">
 
 # Trust Region Preference Approximation: A simple and stable reinforcement learning algorithm for LLM reasoning
+
+[![Paper](https://img.shields.io/badge/paper-A42C25?style=for-the-badge&logo=arxiv&logoColor=white)](https://arxiv.org/abs/2504.04524)  
+
+</div>
+
+
 We propose the Trust Region Preference Approximation (TRPA) algorithm, which integrates rule-based optimization with preference-based optimization for reasoning tasks. As a preference-based algorithm, TRPA naturally eliminates the reward hacking issue. TRPA constructs preference levels using predefined rules, forms corresponding preference pairs, and leverages a novel optimization algorithm for RL training with a theoretical monotonic improvement guarantee. Experimental results demonstrate that TRPA not only achieves competitive performance on reasoning tasks but also exhibits robust stability.
 
 ![TRPA](https://github.com/user-attachments/assets/7c975200-e618-4b1a-9e5e-e50ed1b9de7a)
@@ -26,9 +33,8 @@ pip3 install vllm==0.6.3 ray
 pip3 install flash-attn --no-build-isolation
 pip install wandb IPython matplotlib codetiming accelerate
 pip install tensordict
-pip install omegaconf hydra-core
+pip install omegaconf hydra-core pylatexenc tabulate
 pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
-pip install pylatexenc tabulate
 ```
 
 ## Data Preparation
@@ -54,11 +60,20 @@ Our evaluation scripts automatically runs vLLM to generate 16 samples for each p
 ```
 
 ## Acknowledgements
-- [Verl](https://github.com/volcengine/verl) 🔗
-- [Logic RL](https://github.com/Unakar/Logic-RL) 🔗
-- [Knights and Knaves (K&K) puzzles dataset](https://github.com/AlphaPav/mem-kk-logic) 🔗
+- [Verl](https://arxiv.org/abs/2409.19256) 🔗
+- [Logic RL](https://arxiv.org/abs/2502.14768) 🔗
+- [Knights and Knaves (K&K) puzzles dataset](https://arxiv.org/abs/2410.23123) 🔗
 - [DeepScaleR](https://github.com/agentica-project/deepscaler) 🔗
 
+## Citation
+```bibtex
+@article{su2025trustregionpreferenceapproximation,
+  title={Trust Region Preference Approximation: A simple and stable reinforcement learning algorithm for LLM reasoning}, 
+  author={Xuerui Su and Shufang Xie and Guoqing Liu and Yingce Xia and Renqian Luo and Peiran Jin and Zhiming Ma and Yue Wang and Zun Wang and Yuting Liu},
+  journal={arXiv:2504.04524},
+  year={2025},
+}
+```
 
 
 
