@@ -14,6 +14,8 @@ We propose the Trust Region Preference Approximation (TRPA) algorithm ⚙️, wh
 
 ## 🏆 Benchmark
 
+<div align="center">
+    
 | Model                                                             | 2ppl | 3ppl | 4ppl | 5ppl | 6ppl | 7ppl | 8ppl |
 |------------------------------------------------------------------------|------|------|------|------|------|------|------|
 | o3-mini-high                | 0.99 | 0.98 | 0.97 | 0.95 | 0.94 | 0.89 | 0.83 |
@@ -24,6 +26,7 @@ We propose the Trust Region Preference Approximation (TRPA) algorithm ⚙️, wh
 | Qwen2.5-7B-Logic-RL         | 0.99 | 0.99 | 0.94 | 0.92 | 0.91 | 0.80 | 0.67 |
 | Qwen2.5-7B-TRPA (ours)      | 0.96 | 0.99 | 0.98 | 0.95 | 0.92 | 0.91 | 0.86 |
 
+</div>
 
 ## 🛠️ Installation
 ```bash
