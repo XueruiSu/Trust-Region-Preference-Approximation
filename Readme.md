@@ -2,8 +2,8 @@
 
 # Trust Region Preference Approximation: A simple and stable reinforcement learning algorithm for LLM reasoning
 
-[![Paper](https://img.shields.io/badge/paper-A42C25?style=for-the-badge&logo=arxiv&logoColor=white)](https://arxiv.org/abs/2504.04524)  
-
+<a href="https://arxiv.org/abs/2504.04524"><img src="https://img.shields.io/badge/📝-Paper-orange"></a>
+<a href="https://github.com/XueruiSu/Trust-Region-Preference-Approximation/blob/main/LICENSE"><img src="https://img.shields.io/github/license/XueruiSu/Trust-Region-Preference-Approximation"></a>
 </div>
 
 
