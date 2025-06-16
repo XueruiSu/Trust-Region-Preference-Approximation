@@ -63,11 +63,11 @@ Our evaluation scripts automatically runs vLLM to generate 16 samples for each p
 
 ## 📚 Citation
 ```bibtex
-@article{su2025trustregionpreferenceapproximation,
-  title={Trust Region Preference Approximation: A simple and stable reinforcement learning algorithm for LLM reasoning}, 
-  author={Xuerui Su and Shufang Xie and Guoqing Liu and Yingce Xia and Renqian Luo and Peiran Jin and Zhiming Ma and Yue Wang and Zun Wang and Yuting Liu},
-  journal={arXiv:2504.04524},
-  year={2025},
+@article{su2025trust,
+  title={Trust region preference approximation: A simple and stable reinforcement learning algorithm for llm reasoning},
+  author={Su, Xuerui and Xie, Shufang and Liu, Guoqing and Xia, Yingce and Luo, Renqian and Jin, Peiran and Ma, Zhiming and Wang, Yue and Wang, Zun and Liu, Yuting},
+  journal={arXiv preprint arXiv:2504.04524},
+  year={2025}
 }
 ```
 
