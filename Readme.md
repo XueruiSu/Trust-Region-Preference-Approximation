@@ -2,8 +2,10 @@
 
 # Trust Region Preference Approximation: A simple and stable reinforcement learning algorithm for LLM reasoning
 
-<a href="https://arxiv.org/abs/2504.04524"><img src="https://img.shields.io/badge/📝-Paper-orange"></a>
+<a href="https://arxiv.org/abs/2504.04524"><img src="https://img.shields.io/badge/📝-Paper-blue"></a>
 <a href="https://github.com/XueruiSu/Trust-Region-Preference-Approximation/blob/main/LICENSE"><img src="https://img.shields.io/github/license/XueruiSu/Trust-Region-Preference-Approximation"></a>
+<a href="https://huggingface.co/Xuerui2312/DeepSeek-R1-Distill-Qwen-7B-TRPA-DeepScaleR-verl0326"><img src="https://img.shields.io/badge/🤗-HuggingFace-orange"></a>
+
 </div>
 
 
